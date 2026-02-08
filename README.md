@@ -1,5 +1,25 @@
-## ⚡ Quick Installation
-Run the following command to install BestTunnel on your server:
+# 🛡️ BestTunnel: Ironclad GRE Tunneling
+[![GitHub License](https://img.shields.io/github/license/alirezalaleh2005/BestTunnel?color=blue)](https://github.com/alirezalaleh2005/BestTunnel/blob/main/LICENSE)
+[![Uptime](https://img.shields.io/badge/Uptime-High-brightgreen)]()
+
+**BestTunnel** یک اسکریپت پیشرفته و یکپارچه برای برقراری تانل GRE بین دو سرور (ایران و خارج) است که به طور اختصاصی برای عبور از سنگین‌ترین محدودیت‌های اینترنتی و فیلترینگ هوشمند (DPI) طراحی شده است.
+
+
+
+## ✨ قابلیت‌های کلیدی (Features)
+
+* **Ultra Stealth Mode**: تنظیم خودکار MTU و MSS برای خرد کردن بسته‌ها و دور زدن فایروال‌های لایه ۷.
+* **BBR Speed Engine**: فعال‌سازی پروتکل BBR گوگل برای کاهش پینگ و افزایش چشمگیر سرعت.
+* **Persistent Connection**: قابلیت Auto-Start برای بالا آمدن خودکار تانل پس از ریبوت سرور.
+* **Traffic Analytics**: نمایش لحظه‌ای میزان مصرف ترافیک و وضعیت سلامت اتصال.
+* **Smart Routing**: تنظیم خودکار IP Forwarding برای تبدیل سرور به روتر.
+* **One-Line Installer**: نصب و راه‌اندازی تنها با یک دستور در کمتر از ۱۰ ثانیه.
+
+---
+
+## 🚀 نصب و اجرا (Quick Start)
+
+برای نصب سریع روی سرورهای **Ubuntu** یا **Debian**، دستور زیر را در ترمینال کپی و اجرا کنید:
 
 ```bash
 curl -sL [https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/install.sh](https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/install.sh) | sudo bash
