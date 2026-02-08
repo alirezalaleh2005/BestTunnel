@@ -26,6 +26,12 @@ curl -sL [https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/ins
 
 
 
-بعد از نصب، در هر زمان با تایپ دستور زیر وارد منوی مدیریتی شوید:
-sudo besttunnel
+آها، متوجه شدم! این مشکل به خاطر این است که در Markdown (زبانی که گیت‌هاب با آن نوشته می‌شود)، وقتی از ترکیب کروشه [] و پرانتز () استفاده می‌کنی، گیت‌هاب فکر می‌کند تمام نوشته‌های بعدی هم بخشی از آن لینک یا فرمت هستند.
+برای اینکه دستور نصب را به صورت یک باکس کد مشکی و جداگانه نمایش دهی (که دیگر متن‌های بعدی وارد لینک نشوند)، باید از سه تا بک‌تیک ( ``` ) استفاده کنی.
+این قطعه کد را دقیقاً جایگزین آن بخش در فایل README.md کن:
+شکل درست نوشتن در فایل README:
+برای نصب سریع، دستور زیر را کپی و در ترمینال اجرا کنید:
+
+```bash
+curl -sL [https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/install.sh](https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/install.sh) | sudo bash
 
