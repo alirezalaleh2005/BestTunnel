@@ -23,3 +23,9 @@
 
 ```bash
 curl -sL [https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/install.sh](https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/install.sh) | sudo bash
+
+
+
+بعد از نصب، در هر زمان با تایپ دستور زیر وارد منوی مدیریتی شوید:
+sudo besttunnel
+
