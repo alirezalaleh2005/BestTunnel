@@ -1,15 +1,13 @@
 #!/bin/bash
 
 # ==========================================================
-# Project: BestTunnel Pro (Ultimate All-in-One Edition)
+# Project: BestTunnel Ultimate Edition
 # Developer: alirezalaleh2005
-# Features: GRE/IPIP/SIT, Auto-Heal, Persistence, Anti-DPI
+# Features: GRE/IPIP/SIT, Internal Speedtest, BBR, Anti-DPI
 # ==========================================================
 
 INTERFACE_NAME="besttunnel"
 CONFIG_FILE="/etc/besttunnel.conf"
-SERVICE_FILE="/etc/systemd/system/besttunnel.service"
-WATCHDOG_LOG="/var/log/besttunnel_watchdog.log"
 
 # --- Colors ---
 GREEN='\033[0;32m'
@@ -18,154 +16,140 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-show_logo() {
+show_banner() {
     clear
     echo -e "${CYAN}"
-    echo "  ██████╗ ███████╗███████╗████████╗████████╗██╗   ██╗███╗   ██╗███╗   ██╗███████╗██╗"
-    echo "  ██╔══██╗██╔════╝██╔════╝╚══██╔══╝╚══██╔══╝██║   ██║████╗  ██║████╗  ██║██╔════╝██║"
-    echo "  ██████╔╝█████╗  ███████╗   ██║      ██║   ██║   ██║██╔██╗ ██║██╔██╗ ██║█████╗  ██║"
-    echo "  ██╔══██╗██╔══╝  ╚════██║   ██║      ██║   ██║   ██║██║╚██╗██║██║╚██╗██║██╔══╝  ██║"
-    echo "  ██████╔╝███████╗███████║   ██║      ██║   ╚██████╔╝██║ ╚████║██║ ╚████║███████╗███████╗"
-    echo -e "  ${YELLOW}🛡️  ULTIMATE STEALTH TUNNEL SYSTEM  🛡️${NC}"
+    echo "  ██████╗ ███████╗███████╗████████╗████████╗██╗   ██╗███╗   ██╗███╗   ██╗███████╗"
+    echo "  ██╔══██╗██╔════╝██╔════╝╚══██╔══╝╚══██╔══╝██║   ██║████╗  ██║████╗  ██║██╔════╝"
+    echo "  ██████╔╝█████╗  ███████╗   ██║      ██║   ██║   ██║██╔██╗ ██║██╔██╗ ██║█████╗  "
+    echo "  ██╔══██╗██╔══╝  ╚════██║   ██║      ██║   ██║   ██║██║╚██╗██║██║╚██╗██║██╔══╝  "
+    echo "  ██████╔╝███████╗███████║   ██║      ██║   ╚██████╔╝██║ ╚████║██║ ╚████║███████╗"
+    echo -e "  ${YELLOW}🛡️  INTERNAL SPEED-SYNC TUNNEL PRO v5.0  🛡️${NC}"
     echo "--------------------------------------------------------------------------------------"
 }
 
-# --- Core Tunnel Logic ---
+# --- Core Logic ---
 apply_configs() {
-    [ ! -f $CONFIG_FILE ] && return
+    if [ ! -f $CONFIG_FILE ]; then return; fi
     source $CONFIG_FILE
     
-    # بارگذاری ماژول‌ها
+    # Clean old interface
+    ip link del "$INTERFACE_NAME" 2>/dev/null
     modprobe ip_gre && modprobe ipip && modprobe sit
 
-    # پاکسازی اینترفیس قدیمی
-    ip link del "$INTERFACE_NAME" 2>/dev/null
-    
-    # ساخت تونل بر اساس پروتکل انتخاب شده
     LOCAL_IP=$(hostname -I | awk '{print $1}')
     ip tunnel add "$INTERFACE_NAME" mode "${MODE:-gre}" remote "$REMOTE_IP" local "$LOCAL_IP" ttl 255
     
-    # تنظیم آی‌پی داخلی
     L_TUN="$IP_BASE.1"; R_TUN="$IP_BASE.2"
     [ "$ROLE" == "2" ] && { L_TUN="$IP_BASE.2"; R_TUN="$IP_BASE.1"; }
     
     ip addr add "$L_TUN/30" dev "$INTERFACE_NAME"
-    ip link set dev "$INTERFACE_NAME" mtu "${MTU:-1100}"
-    ip link set "$INTERFACE_NAME" up
+    ip link set dev "$INTERFACE_NAME" mtu 1100 up
     
-    # Forwarding & NAT
+    # Forwarding & MSS Clamping (Anti-DPI)
     sysctl -w net.ipv4.ip_forward=1 > /dev/null
-    if [ "$ROLE" == "2" ]; then
-        iptables -t nat -D POSTROUTING -s $IP_BASE.0/30 -o eth0 -j MASQUERADE 2>/dev/null
-        iptables -t nat -A POSTROUTING -s $IP_BASE.0/30 -o eth0 -j MASQUERADE
-    fi
-}
-
-# --- Features ---
-setup_tunnel() {
-    show_logo
-    echo -e "${YELLOW}--- Tunnel Configuration ---${NC}"
-    echo "1) IRAN Server"
-    echo "2) FOREIGN Server"
-    read -p "Select role [1/2]: " ROLE
-    read -p "Remote Server IP: " REMOTE_IP
-    read -p "Internal IP Range (e.g 10.0.0): " IP_BASE
-    IP_BASE=${IP_BASE:-"10.0.0"}
-    
-    echo "ROLE=$ROLE" > $CONFIG_FILE
-    echo "REMOTE_IP=$REMOTE_IP" >> $CONFIG_FILE
-    echo "IP_BASE=$IP_BASE" >> $CONFIG_FILE
-    echo "MODE=gre" >> $CONFIG_FILE
-    echo "MTU=1100" >> $CONFIG_FILE
-    
-    apply_configs
-    echo -e "${GREEN}Done! Tunnel established.${NC}"
-}
-
-apply_routing() {
-    source $CONFIG_FILE 2>/dev/null
-    R_TUN="$IP_BASE.2"; [ "$ROLE" == "2" ] && R_TUN="$IP_BASE.1"
-    
-    read -p "Enter ports to route (e.g 443,80,20000:30000): " PORTS
-    iptables -t mangle -F
-    # Anti-DPI TCP MSS Clamping
     iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 900
     
-    if ! grep -q "100 tunnel" /etc/iproute2/rt_tables; then
-        echo "100 tunnel" >> /etc/iproute2/rt_tables
+    if [ "$ROLE" == "2" ]; then
+        iptables -t nat -A POSTROUTING -s $IP_BASE.0/30 -o eth0 -j MASQUERADE 2>/dev/null
+    fi
+}
+
+# --- Speedtest Function ---
+run_internal_speedtest() {
+    source $CONFIG_FILE 2>/dev/null
+    if [ -z "$IP_BASE" ]; then echo -e "${RED}خطا: ابتدا تانل را راه‌اندازی کنید.${NC}"; return; fi
+
+    echo -e "${YELLOW}در حال نصب و آماده‌سازی iperf3...${NC}"
+    apt-get update -qq && apt-get install -y iperf3 > /dev/null 2>&1
+    
+    TARGET_IP="$IP_BASE.2"; [ "$ROLE" == "2" ] && TARGET_IP="$IP_BASE.1"
+
+    echo -e "${CYAN}>>> شروع تست سرعت داخلی به سمت $TARGET_IP...${NC}"
+    echo -e "${YELLOW}نکته: برای نتیجه دقیق، این گزینه را همزمان روی هر دو سرور اجرا کنید.${NC}"
+    
+    # Run server in background
+    iperf3 -s -1 > /dev/null 2>&1 &
+    sleep 2
+    
+    # Run client test
+    iperf3 -c "$TARGET_IP" -t 10
+}
+
+# --- Menu ---
+while true; do
+    show_banner
+    status="${RED}OFFLINE${NC}"
+    current_mode="NONE"
+    if ip link show "$INTERFACE_NAME" > /dev/null 2>&1; then 
+        status="${GREEN}ONLINE${NC}"
+        current_mode=$(grep MODE $CONFIG_FILE | cut -d= -f2 | tr '[:lower:]' '[:upper:]')
     fi
     
-    iptables -t mangle -A PREROUTING -p tcp -m multiport --dports "$PORTS" -j MARK --set-mark 1
-    iptables -t mangle -A PREROUTING -p udp -m multiport --dports "$PORTS" -j MARK --set-mark 1
-    ip rule add fwmark 1 table tunnel 2>/dev/null
-    ip route replace default via "$R_TUN" dev $INTERFACE_NAME table tunnel
-    echo -e "${GREEN}Routing applied for ports: $PORTS${NC}"
-}
-
-change_proto() {
-    echo -e "Choose Protocol: 1) GRE  2) IPIP  3) SIT"
-    read -p "Select: " P
-    case $P in
-        1) M="gre" ;;
-        2) M="ipip" ;;
-        3) M="sit" ;;
-    esac
-    sed -i "s/MODE=.*/MODE=$M/" $CONFIG_FILE
-    apply_configs
-}
-
-# --- System Logic ---
-if [[ "$1" == "--apply" ]]; then
-    apply_configs
-    exit 0
-fi
-
-# --- Main Menu ---
-while true; do
-    show_logo
-    status="${RED}OFFLINE${NC}"
-    ip link show "$INTERFACE_NAME" > /dev/null 2>&1 && status="${GREEN}ONLINE${NC}"
-    echo -e "STATUS: $status | PROTOCOL: $(grep MODE $CONFIG_FILE | cut -d= -f2)"
+    echo -e "وضعیت اتصال: $status | پروتکل فعال: ${YELLOW}$current_mode${NC}"
     echo "--------------------------------------------------------------------------------------"
-    echo -e "1) 🛠️  Setup/Update Tunnel"
-    echo -e "2) 🛡️  Route Ports (Anti-DPI)"
-    echo -e "3) 🔄  Switch Protocol (GRE/IPIP/SIT)"
-    echo -e "4) 🐕  Enable Persistence (Auto-Start)"
-    echo -e "5) 🚀  Optimize TCP (BBR)"
-    echo -e "6) 🧨  Reset Everything"
-    echo -e "0)  Exit"
+    echo -e "1) 🛠️  راه‌اندازی تانل (Setup/Update)"
+    echo -e "2) ⚡  تست سرعت داخلی (Internal Speedtest)"
+    echo -e "3) 🔄  تغییر پروتکل (GRE / IPIP / SIT)"
+    echo -e "4) 🛡️  مسیریابی پورت‌ها (Routing)"
+    echo -e "5) 🚀  بهینه‌سازی سرعت (BBR)"
+    echo -e "6) 🧨  حذف کامل تنظیمات (Reset)"
+    echo -e "0)  خروج"
     echo "--------------------------------------------------------------------------------------"
-    read -p "Option: " OPT
+    read -p "یک گزینه را انتخاب کنید: " OPT
 
     case $OPT in
-        1) setup_tunnel ;;
-        2) apply_routing ;;
-        3) change_proto ;;
+        1)
+            echo -e "${CYAN}تنظیمات اولیه:${NC}"
+            read -p "نقش سرور (1 برای ایران / 2 برای خارج): " ROLE
+            read -p "آی‌پی سرور مقابل: " REMOTE_IP
+            read -p "رنج آی‌پی تانل (مثلاً 10.0.0): " IP_BASE
+            IP_BASE=${IP_BASE:-"10.0.0"}
+            
+            echo -e "ROLE=$ROLE\nREMOTE_IP=$REMOTE_IP\nIP_BASE=$IP_BASE\nMODE=gre" > $CONFIG_FILE
+            apply_configs
+            echo -e "${GREEN}تانل با موفقیت راه‌اندازی شد.${NC}" ;;
+            
+        2) run_internal_speedtest ;;
+        
+        3)
+            echo -e "1) GRE (پیش‌فرض/سریع)\n2) IPIP (سبک)\n3) SIT (عبور از فیلترینگ شدید)"
+            read -p "پروتکل را انتخاب کنید: " P
+            case $P in
+                1) M="gre" ;;
+                2) M="ipip" ;;
+                3) M="sit" ;;
+                *) M="gre" ;;
+            esac
+            sed -i "s/MODE=.*/MODE=$M/" $CONFIG_FILE
+            apply_configs
+            echo -e "${GREEN}پروتکل به $M تغییر یافت.${NC}" ;;
+            
         4)
-            cat <<EOF > $SERVICE_FILE
-[Unit]
-Description=BestTunnel Persistence
-After=network.target
-[Service]
-Type=oneshot
-ExecStart=$(realpath $0) --apply
-RemainAfterExit=yes
-[Install]
-WantedBy=multi-user.target
-EOF
-            systemctl daemon-reload && systemctl enable besttunnel.service
-            echo -e "${GREEN}Persistence enabled.${NC}" ;;
+            read -p "پورت‌های مورد نظر را وارد کنید (مثلاً 443,80,20000:30000): " PORTS
+            source $CONFIG_FILE
+            R_TUN="$IP_BASE.2"; [ "$ROLE" == "2" ] && R_TUN="$IP_BASE.1"
+            if ! grep -q "100 tunnel" /etc/iproute2/rt_tables; then echo "100 tunnel" >> /etc/iproute2/rt_tables; fi
+            iptables -t mangle -F
+            iptables -t mangle -A PREROUTING -p tcp -m multiport --dports "$PORTS" -j MARK --set-mark 1
+            iptables -t mangle -A PREROUTING -p udp -m multiport --dports "$PORTS" -j MARK --set-mark 1
+            ip rule add fwmark 1 table tunnel 2>/dev/null
+            ip route replace default via "$R_TUN" dev $INTERFACE_NAME table tunnel
+            echo -e "${GREEN}مسیریابی برای پورت‌های $PORTS اعمال شد.${NC}" ;;
+            
         5)
             echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
             echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-            sysctl -p > /dev/null && echo -e "${GREEN}BBR Optimized.${NC}" ;;
+            sysctl -p
+            echo -e "${GREEN}بهینه‌ساز BBR فعال شد.${NC}" ;;
+            
         6)
             ip link del "$INTERFACE_NAME" 2>/dev/null
+            rm $CONFIG_FILE 2>/dev/null
             iptables -F && iptables -t nat -F && iptables -t mangle -F
-            systemctl disable besttunnel.service 2>/dev/null
-            rm $CONFIG_FILE $SERVICE_FILE 2>/dev/null
-            echo "System cleaned." ;;
+            echo -e "${RED}تمام تنظیمات پاکسازی شد.${NC}" ;;
+            
         0) exit 0 ;;
     esac
-    read -p "Press Enter..."
+    read -p "برای بازگشت اینتر بزنید..."
 done
