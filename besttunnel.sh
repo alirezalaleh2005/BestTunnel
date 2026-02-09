@@ -4,6 +4,7 @@
 # Project: BestTunnel Ultimate Edition
 # Developer: alirezalaleh2005
 # Features: GRE/IPIP/SIT, Internal Speedtest, BBR, Anti-DPI
+# Language: English
 # ==========================================================
 
 INTERFACE_NAME="besttunnel"
@@ -58,15 +59,15 @@ apply_configs() {
 # --- Speedtest Function ---
 run_internal_speedtest() {
     source $CONFIG_FILE 2>/dev/null
-    if [ -z "$IP_BASE" ]; then echo -e "${RED}خطا: ابتدا تانل را راه‌اندازی کنید.${NC}"; return; fi
+    if [ -z "$IP_BASE" ]; then echo -e "${RED}Error: Please setup the tunnel first.${NC}"; return; fi
 
-    echo -e "${YELLOW}در حال نصب و آماده‌سازی iperf3...${NC}"
+    echo -e "${YELLOW}Installing iperf3 and preparing...${NC}"
     apt-get update -qq && apt-get install -y iperf3 > /dev/null 2>&1
     
     TARGET_IP="$IP_BASE.2"; [ "$ROLE" == "2" ] && TARGET_IP="$IP_BASE.1"
 
-    echo -e "${CYAN}>>> شروع تست سرعت داخلی به سمت $TARGET_IP...${NC}"
-    echo -e "${YELLOW}نکته: برای نتیجه دقیق، این گزینه را همزمان روی هر دو سرور اجرا کنید.${NC}"
+    echo -e "${CYAN}>>> Starting Internal Speedtest to $TARGET_IP...${NC}"
+    echo -e "${YELLOW}Note: For accurate results, run this option on BOTH servers simultaneously.${NC}"
     
     # Run server in background
     iperf3 -s -1 > /dev/null 2>&1 &
@@ -86,35 +87,35 @@ while true; do
         current_mode=$(grep MODE $CONFIG_FILE | cut -d= -f2 | tr '[:lower:]' '[:upper:]')
     fi
     
-    echo -e "وضعیت اتصال: $status | پروتکل فعال: ${YELLOW}$current_mode${NC}"
+    echo -e "STATUS: $status | PROTOCOL: ${YELLOW}$current_mode${NC}"
     echo "--------------------------------------------------------------------------------------"
-    echo -e "1) 🛠️  راه‌اندازی تانل (Setup/Update)"
-    echo -e "2) ⚡  تست سرعت داخلی (Internal Speedtest)"
-    echo -e "3) 🔄  تغییر پروتکل (GRE / IPIP / SIT)"
-    echo -e "4) 🛡️  مسیریابی پورت‌ها (Routing)"
-    echo -e "5) 🚀  بهینه‌سازی سرعت (BBR)"
-    echo -e "6) 🧨  حذف کامل تنظیمات (Reset)"
-    echo -e "0)  خروج"
+    echo -e "1) 🛠️  Setup/Update Tunnel"
+    echo -e "2) ⚡  Internal Speedtest (iperf3)"
+    echo -e "3) 🔄  Switch Protocol (GRE/IPIP/SIT)"
+    echo -e "4) 🛡️  Port Routing"
+    echo -e "5) 🚀  Optimize Speed (BBR)"
+    echo -e "6) 🧨  Reset All Settings"
+    echo -e "0)  Exit"
     echo "--------------------------------------------------------------------------------------"
-    read -p "یک گزینه را انتخاب کنید: " OPT
+    read -p "Choose an option: " OPT
 
     case $OPT in
         1)
-            echo -e "${CYAN}تنظیمات اولیه:${NC}"
-            read -p "نقش سرور (1 برای ایران / 2 برای خارج): " ROLE
-            read -p "آی‌پی سرور مقابل: " REMOTE_IP
-            read -p "رنج آی‌پی تانل (مثلاً 10.0.0): " IP_BASE
+            echo -e "${CYAN}Initial Setup:${NC}"
+            read -p "Server Role (1 for IRAN / 2 for FOREIGN): " ROLE
+            read -p "Remote Server IP: " REMOTE_IP
+            read -p "Tunnel IP Base (e.g. 10.0.0): " IP_BASE
             IP_BASE=${IP_BASE:-"10.0.0"}
             
             echo -e "ROLE=$ROLE\nREMOTE_IP=$REMOTE_IP\nIP_BASE=$IP_BASE\nMODE=gre" > $CONFIG_FILE
             apply_configs
-            echo -e "${GREEN}تانل با موفقیت راه‌اندازی شد.${NC}" ;;
+            echo -e "${GREEN}Tunnel setup successfully.${NC}" ;;
             
         2) run_internal_speedtest ;;
         
         3)
-            echo -e "1) GRE (پیش‌فرض/سریع)\n2) IPIP (سبک)\n3) SIT (عبور از فیلترینگ شدید)"
-            read -p "پروتکل را انتخاب کنید: " P
+            echo -e "1) GRE (Default/Fast)\n2) IPIP (Lightweight)\n3) SIT (Best for heavy censorship)"
+            read -p "Select protocol: " P
             case $P in
                 1) M="gre" ;;
                 2) M="ipip" ;;
@@ -123,10 +124,10 @@ while true; do
             esac
             sed -i "s/MODE=.*/MODE=$M/" $CONFIG_FILE
             apply_configs
-            echo -e "${GREEN}پروتکل به $M تغییر یافت.${NC}" ;;
+            echo -e "${GREEN}Protocol changed to $M.${NC}" ;;
             
         4)
-            read -p "پورت‌های مورد نظر را وارد کنید (مثلاً 443,80,20000:30000): " PORTS
+            read -p "Enter ports to route (e.g. 443,80,20000:30000): " PORTS
             source $CONFIG_FILE
             R_TUN="$IP_BASE.2"; [ "$ROLE" == "2" ] && R_TUN="$IP_BASE.1"
             if ! grep -q "100 tunnel" /etc/iproute2/rt_tables; then echo "100 tunnel" >> /etc/iproute2/rt_tables; fi
@@ -135,21 +136,21 @@ while true; do
             iptables -t mangle -A PREROUTING -p udp -m multiport --dports "$PORTS" -j MARK --set-mark 1
             ip rule add fwmark 1 table tunnel 2>/dev/null
             ip route replace default via "$R_TUN" dev $INTERFACE_NAME table tunnel
-            echo -e "${GREEN}مسیریابی برای پورت‌های $PORTS اعمال شد.${NC}" ;;
+            echo -e "${GREEN}Routing applied for ports: $PORTS${NC}" ;;
             
         5)
             echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
             echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
             sysctl -p
-            echo -e "${GREEN}بهینه‌ساز BBR فعال شد.${NC}" ;;
+            echo -e "${GREEN}BBR Optimization enabled.${NC}" ;;
             
         6)
             ip link del "$INTERFACE_NAME" 2>/dev/null
             rm $CONFIG_FILE 2>/dev/null
             iptables -F && iptables -t nat -F && iptables -t mangle -F
-            echo -e "${RED}تمام تنظیمات پاکسازی شد.${NC}" ;;
+            echo -e "${RED}All settings have been cleared.${NC}" ;;
             
         0) exit 0 ;;
     esac
-    read -p "برای بازگشت اینتر بزنید..."
+    read -p "Press Enter to continue..."
 done
