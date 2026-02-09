@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# Project: BestTunnel Pro (Dual-Side Intelligent Edition)
+# Project: BestTunnel Pro (Multi-Port & Range Support)
 # Developer: alirezalaleh2005
 # ==========================================================
 
@@ -24,107 +24,102 @@ show_logo() {
     echo " |  _ \|  _| \___ \ | |   | | | | | |  \| |  \| |  _| | |    "
     echo " | |_) | |___ ___) || |   | | | |_| | |\  | |\  | |___| |___ "
     echo " |____/|_____|____/ |_|   |_|  \___/|_| \_|_| \_|_____|_____|"
-    echo -e "             ${YELLOW}Iran <---> Remote Dual-Side System${NC}"
+    echo -e "             ${YELLOW}Multi-Port & Range Routing System${NC}"
     echo "------------------------------------------------------------"
 }
 
-# --- Intelligent Setup (Iran & Foreign) ---
+# --- Intelligent Setup ---
 setup_tunnel() {
-    echo -e "${YELLOW}Tunnel Configuration Service...${NC}"
-    echo "1) IRAN Server (Main Ingress)"
-    echo "2) FOREIGN Server (Egress/Exit)"
-    read -p "Select this server role [1/2]: " ROLE
+    echo -e "${YELLOW}Tunnel Configuration...${NC}"
+    echo "1) IRAN Server"
+    echo "2) FOREIGN Server"
+    read -p "Select role [1/2]: " ROLE
+    read -p "Enter REMOTE Public IP: " REMOTE_IP
 
-    read -p "Enter the PUBLIC IP of the OTHER server: " REMOTE_IP
-
-    # پیکربندی هوشمند بر اساس نقش
     if [ "$ROLE" == "1" ]; then
         L_TUN="10.0.0.1"; R_TUN="10.0.0.2"
-        SIDE="IRAN"
     else
         L_TUN="10.0.0.2"; R_TUN="10.0.0.1"
-        SIDE="FOREIGN"
     fi
 
-    echo -e "${CYAN}Setting up $SIDE server...${NC}"
-    
-    # حذف اینترفیس قدیمی و ساخت جدید
     modprobe ip_gre
     ip link del "$INTERFACE_NAME" 2>/dev/null
     ip tunnel add "$INTERFACE_NAME" mode gre remote "$REMOTE_IP" local "$LOCAL_IP" ttl 255
     ip addr add "$L_TUN/30" dev "$INTERFACE_NAME"
     ip link set "$INTERFACE_NAME" up
-
-    # فعال‌سازی Forwarding بصورت سیستمی
     sysctl -w net.ipv4.ip_forward=1 > /dev/null
 
-    if [ "$ROLE" == "1" ]; then
-        echo -e "${GREEN}Iran Server is READY. Internal IP: 10.0.0.1${NC}"
-    else
-        # تنظیمات مخصوص سرور خارج برای بازگشت ترافیک
+    if [ "$ROLE" == "2" ]; then
         iptables -t nat -A POSTROUTING -s 10.0.0.0/30 -o eth0 -j MASQUERADE
-        echo -e "${GREEN}Foreign Server is READY. Internal IP: 10.0.0.2${NC}"
     fi
+    echo -e "${GREEN}Tunnel Setup Completed.${NC}"
 }
 
-# --- Anti-Filter & Port Routing ---
+# --- Multi-Port & Range Routing ---
 apply_advanced_routing() {
-    echo -e "${PURPLE}Applying Anti-DPI & Port Routing...${NC}"
-    
-    # MTU Optimization
-    ip link set dev "$INTERFACE_NAME" mtu 1280
-    iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1200
-    
-    echo "Enter ports to route through tunnel (e.g: 443,8080 or leave empty for all):"
-    read -p "Ports: " USER_PORTS
+    echo -e "${PURPLE}Advanced Port Routing (Multi-Port Support)${NC}"
+    echo -e "${CYAN}Examples: 443 | 80,443,8080 | 10000-20000${NC}"
+    read -p "Enter ports/range: " USER_PORTS
 
     if [ -n "$USER_PORTS" ]; then
+        # بهینه‌سازی MTU برای ضد فیلتر
+        ip link set dev "$INTERFACE_NAME" mtu 1280
+        iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1200
+
+        # ایجاد جدول روتینگ
         if ! grep -q "100 tunnel" /etc/iproute2/rt_tables; then
             echo "100 tunnel" >> /etc/iproute2/rt_tables
         fi
-        ip route add default via 10.0.0.2 dev $INTERFACE_NAME table tunnel 2>/dev/null
         
-        IFS=',' read -ra ADDR <<< "$USER_PORTS"
-        for port in "${ADDR[@]}"; do
-            iptables -t mangle -A PREROUTING -p tcp --dport $port -j MARK --set-mark 1
-            echo -e "${GREEN}Port $port marked for Tunnel.${NC}"
-        done
-        ip rule add fwmark 1 table tunnel 2>/dev/null
+        # پاکسازی رول‌های قدیمی برای جلوگیری از تداخل
+        ip rule del fwmark 1 table tunnel 2>/dev/null
+        iptables -t mangle -F PREROUTING
+
+        # اعمال روتینگ پورت‌ها (پشتیبانی از کاما و خط تیره)
+        iptables -t mangle -A PREROUTING -p tcp -m multiport --dports "$USER_PORTS" -j MARK --set-mark 1
+        iptables -t mangle -A PREROUTING -p udp -m multiport --dports "$USER_PORTS" -j MARK --set-mark 1
+        
+        ip route replace default via 10.0.0.2 dev $INTERFACE_NAME table tunnel
+        ip rule add fwmark 1 table tunnel
         iptables -t nat -A POSTROUTING -o $INTERFACE_NAME -j MASQUERADE
+        
+        echo -e "${GREEN}Successfully routed ports: $USER_PORTS${NC}"
     else
-        echo -e "${YELLOW}No specific ports entered. Applying general Anti-DPI only.${NC}"
+        echo -e "${RED}No ports entered!${NC}"
     fi
 }
 
-# --- Main Menu ---
+# --- Menu Logic ---
 if [[ $EUID -ne 0 ]]; then echo -e "${RED}Run as root!${NC}"; exit 1; fi
 
 while true; do
     show_logo
-    status="${RED}OFFLINE${NC}"
-    ip link show "$INTERFACE_NAME" > /dev/null 2>&1 && status="${GREEN}ONLINE${NC}"
+    ip link show "$INTERFACE_NAME" > /dev/null 2>&1 && status="${GREEN}ONLINE${NC}" || status="${RED}OFFLINE${NC}"
     echo -e "STATUS: $status | LOCAL IP: $LOCAL_IP"
     echo "------------------------------------------------------------"
-    echo -e "1) 🛠️ Setup Tunnel (Iran or Foreign)"
-    echo -e "2) 🛡️ Activate Anti-Filter & Port Routing"
-    echo -e "3) 🚀 Speed Boost (BBR Optimization)"
-    echo -e "4) 📊 Traffic Status & Analytics"
-    echo -e "5) 📡 Ping Test (Connection Check)"
-    echo -e "6) 🧨 Reset All Settings"
+    echo -e "1) 🛠️ Setup Tunnel (Iran/Foreign)"
+    echo -e "2) 🛡️ Multi-Port Routing (Single, List, or Range)"
+    echo -e "3) 🚀 Speed Boost (BBR)"
+    echo -e "4) 📡 Ping Test"
+    echo -e "5) 🧨 Reset All"
     echo -e "0) Exit"
     echo "------------------------------------------------------------"
-    read -p "Choose: " OPT
+    read -p "Select: " OPT
 
     case $OPT in
         1) setup_tunnel ;;
         2) apply_advanced_routing ;;
-        3) echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf; echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf; sysctl -p ;;
-        4) ip -s link show "$INTERFACE_NAME" ;;
-        5) ping -c 4 10.0.0.2 ;;
-        6) 
+        3) 
+            echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+            echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+            sysctl -p
+            echo -e "${GREEN}BBR Activated.${NC}" ;;
+        4) ping -c 4 10.0.0.2 ;;
+        5) 
             ip link del "$INTERFACE_NAME" 2>/dev/null
             iptables -F && iptables -t nat -F && iptables -t mangle -F
-            echo "All settings cleared." ;;
+            ip rule del fwmark 1 table tunnel 2>/dev/null
+            echo "Reset Done." ;;
         0) exit 0 ;;
     esac
     read -p "Press Enter..."
