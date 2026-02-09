@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==========================================================
-# Project: BestTunnel Pro (Ironclad Edition)
-# Description: High-Performance GRE Tunnel with Anti-DPI
+# Project: BestTunnel Pro (Ultra Port-Routing Edition)
+# Developer: alirezalaleh2005
 # ==========================================================
 
 INTERFACE_NAME="besttunnel"
@@ -16,7 +16,7 @@ YELLOW='\033[1;33m'
 PURPLE='\033[0;35m'
 NC='\033[0m'
 
-# --- Header / Logo ---
+# --- Logo ---
 show_logo() {
     clear
     echo -e "${CYAN}"
@@ -25,86 +25,101 @@ show_logo() {
     echo " |  _ \|  _| \___ \ | |   | | | | | |  \| |  \| |  _| | |    "
     echo " | |_) | |___ ___) || |   | | | |_| | |\  | |\  | |___| |___ "
     echo " |____/|_____|____/ |_|   |_|  \___/|_| \_|_| \_|_____|_____|"
-    echo -e "             ${YELLOW}Heavy Filtering Defense System${NC}"
+    echo -e "             ${YELLOW}Advanced Multi-Port Tunneling System${NC}"
     echo "------------------------------------------------------------"
 }
 
-# --- 1. GRE Core ---
+# --- 1. Setup GRE Core ---
 setup_gre() {
+    echo -e "${YELLOW}Setting up GRE Tunnel...${NC}"
     read -p "Enter Remote Server Public IP: " REMOTE_IP
     read -p "Is this Server 1 (Iran) or 2 (Foreign)? [1/2]: " ROLE
     
     L_TUN="10.0.0.1"; R_TUN="10.0.0.2"
     [[ "$ROLE" == "2" ]] && { L_TUN="10.0.0.2"; R_TUN="10.0.0.1"; }
 
-    echo -e "${YELLOW}Creating GRE Tunnel...${NC}"
     modprobe ip_gre
     ip link del "$INTERFACE_NAME" 2>/dev/null
     ip tunnel add "$INTERFACE_NAME" mode gre remote "$REMOTE_IP" local "$LOCAL_IP" ttl 255
     ip addr add "$L_TUN/30" dev "$INTERFACE_NAME"
     ip link set "$INTERFACE_NAME" up
-    echo -e "${GREEN}GRE Interface Created Successfully.${NC}"
+    
+    # Enable IP Forwarding
+    sysctl -w net.ipv4.ip_forward=1 > /dev/null
+    
+    echo -e "${GREEN}GRE Interface Established ($L_TUN -> $R_TUN).${NC}"
 }
 
-# --- 2. Ultra Anti-Filter Shield ---
-apply_anti_filter() {
-    echo -e "${PURPLE}Applying Anti-DPI & Stealth Shields...${NC}"
-    # Optimized MTU for Iran Infrastructure
+# --- 2. Anti-DPI & MTU Shield ---
+apply_shields() {
+    echo -e "${PURPLE}Applying Anti-Filter & MTU Optimization...${NC}"
+    # تنظیم MTU بهینه برای عبور از فیلترینگ هوشمند ایران
     ip link set dev "$INTERFACE_NAME" mtu 1280
-    # TCPMSS Clamping to prevent packet drops
+    # کلمپ کردن MSS برای جلوگیری از دراپ شدن بسته‌های TCP
+    iptables -t mangle -F FORWARD
     iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1200
-    # ICMP Stealth
-    echo 1 > /proc/sys/net/ipv4/icmp_echo_ignore_all
-    echo -e "${GREEN}Shields are UP! (MTU 1280 / MSS 1200)${NC}"
+    echo -e "${GREEN}Anti-DPI Shield Active (MTU 1280).${NC}"
 }
 
-# --- 3. Hyper Speed (BBR) ---
+# --- 3. Port Specific Routing (NEW) ---
+route_ports() {
+    echo -e "${CYAN}--- Port Specific Routing ---${NC}"
+    echo "Enter the ports you want to send through tunnel (comma separated, e.g: 80,443,2082)"
+    read -p "Ports: " USER_PORTS
+    
+    # ایجاد جدول مسیریابی مخصوص تانل
+    if ! grep -q "100 tunnel" /etc/iproute2/rt_tables; then
+        echo "100 tunnel" >> /etc/iproute2/rt_tables
+    fi
+
+    # پاکسازی قوانین قدیمی
+    ip rule del fwmark 1 table tunnel 2>/dev/null
+    ip route flush table tunnel 2>/dev/null
+    
+    # هدایت ترافیک جدول به سمت آی‌پی تانل (سرور مقابل)
+    ip route add default via 10.0.0.2 dev $INTERFACE_NAME table tunnel
+
+    # تبدیل کاما به پورت‌های جداگانه و اعمال در iptables
+    IFS=',' read -ra ADDR <<< "$USER_PORTS"
+    for port in "${ADDR[@]}"; do
+        iptables -t mangle -A PREROUTING -p tcp --dport $port -j MARK --set-mark 1
+        iptables -t mangle -A PREROUTING -p udp --dport $port -j MARK --set-mark 1
+        echo -e "${GREEN}Port $port is now marked for Tunnel.${NC}"
+    done
+
+    # فعال سازی قانون مسیریابی برای مارک 1
+    ip rule add fwmark 1 table tunnel
+    
+    # NAT برای خروج ترافیک از تانل
+    iptables -t nat -A POSTROUTING -o $INTERFACE_NAME -j MASQUERADE
+    
+    echo -e "${YELLOW}Routing applied successfully!${NC}"
+}
+
+# --- 4. BBR Speed Boost ---
 enable_bbr() {
-    echo -e "${CYAN}Activating BBR Speed Engine...${NC}"
+    echo -e "${CYAN}Optimizing Network Speed (BBR)...${NC}"
     if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
         echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
         echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
         sysctl -p
     fi
-    echo -e "${GREEN}BBR is active. Speed optimized.${NC}"
+    echo -e "${GREEN}BBR Speed Boost is now Active.${NC}"
 }
 
-# --- 4. Persistence ---
-enable_persistence() {
-    echo -e "${YELLOW}Setting up Auto-Start Service...${NC}"
-    SCRIPT_PATH=$(readlink -f "$0")
-    cat <<EOF > /etc/systemd/system/besttunnel.service
-[Unit]
-Description=BestTunnel Persistence Service
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/bash $SCRIPT_PATH 1
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    systemctl enable besttunnel.service > /dev/null 2>&1
-    echo -e "${GREEN}Persistence enabled for reboots.${NC}"
+# --- 5. Reset & Clear ---
+reset_all() {
+    echo -e "${RED}Clearing all tunnel rules and interfaces...${NC}"
+    ip link del "$INTERFACE_NAME" 2>/dev/null
+    iptables -F
+    iptables -t nat -F
+    iptables -t mangle -F
+    ip rule del fwmark 1 table tunnel 2>/dev/null
+    echo -e "${GREEN}System Reset Done.${NC}"
 }
 
-# --- 5. Traffic Analytics ---
-show_analytics() {
-    echo -e "${YELLOW}--- Traffic Analytics ---${NC}"
-    if ip link show "$INTERFACE_NAME" > /dev/null 2>&1; then
-        RX=$(ip -s link show "$INTERFACE_NAME" | grep -A 1 "RX" | tail -n 1 | awk '{print $1}')
-        TX=$(ip -s link show "$INTERFACE_NAME" | grep -A 1 "TX" | tail -n 1 | awk '{print $1}')
-        echo -e "Download: $(($RX/1024/1024)) MB"
-        echo -e "Upload: $(($TX/1024/1024)) MB"
-    else
-        echo -e "${RED}Tunnel is Offline.${NC}"
-    fi
-}
-
-# --- Main Logic ---
-if [[ $EUID -ne 0 ]]; then echo -e "${RED}Please run as root!${NC}"; exit 1; fi
+# --- Main Menu ---
+if [[ $EUID -ne 0 ]]; then echo -e "${RED}Run as root!${NC}"; exit 1; fi
 
 while true; do
     show_logo
@@ -113,24 +128,24 @@ while true; do
     echo -e "STATUS: $status | LOCAL IP: $LOCAL_IP"
     echo "------------------------------------------------------------"
     echo -e "1) ${GREEN}[CORE]${NC} Setup GRE Tunnel"
-    echo -e "2) ${PURPLE}[SHIELD]${NC} Activate Anti-Filter (DPI Bypass)"
-    echo -e "3) ${CYAN}[SPEED]${NC} Boost Speed (BBR/Forwarding)"
-    echo -e "4) ${YELLOW}[STABLE]${NC} Enable Auto-Start (Persistence)"
-    echo -e "5) ${CYAN}[REPORT]${NC} Traffic Analytics & Stats"
-    echo -e "6) ${GREEN}[TEST]${NC} Ping Test"
-    echo -e "0) ${RED}[EXIT]${NC}"
+    echo -e "2) ${PURPLE}[SHIELD]${NC} Activate Anti-Filter (MTU/MSS)"
+    echo -e "3) ${YELLOW}[ROUTE]${NC} Pass Specific Ports through Tunnel"
+    echo -e "4) ${CYAN}[SPEED]${NC} Enable BBR Speed Engine"
+    echo -e "5) ${GREEN}[TEST]${NC} Ping Test (10.0.0.2)"
+    echo -e "6) ${RED}[RESET]${NC} Clear Everything"
+    echo -e "0) Exit"
     echo "------------------------------------------------------------"
-    read -p "Choose an option: " OPT
+    read -p "Select Option: " OPT
 
     case $OPT in
         1) setup_gre ;;
-        2) apply_anti_filter ;;
-        3) enable_bbr; sysctl -w net.ipv4.ip_forward=1 ;;
-        4) enable_persistence ;;
-        5) show_analytics ;;
-        6) ping -c 4 10.0.0.2 ;;
+        2) apply_shields ;;
+        3) route_ports ;;
+        4) enable_bbr ;;
+        5) ping -c 4 10.0.0.2 ;;
+        6) reset_all ;;
         0) exit 0 ;;
-        *) echo "Invalid option." ;;
+        *) echo "Invalid choice." ;;
     esac
-    read -p "Press Enter to return..."
+    read -p "Press Enter to continue..."
 done
