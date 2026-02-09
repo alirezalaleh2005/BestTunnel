@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# Project: BestTunnel - Layer 3 Only (GRE/IPIP/SIT)
-# Version: 8.6 (Edited per user request)
-# Developer: alirezalaleh2005 → Optimized & Cleaned
-# Features: IP validation, ping test, tunnel mode selection, bandwidth test (no iperf), BBR
+# Project: BestTunnel - Smart Layer 3 Only (No Rathole)
+# Version: 8.6 (Tunnel Speedtest + Auto-Probe + Anti-Filter)
+# Developer: alirezalaleh2005 → Fully Edited per User Request
+# Features: Auto protocol selection, internal tunnel speedtest, ping validation, Iran-optimized
 # ==============================================================================
 
 set -euo pipefail
@@ -42,8 +42,62 @@ show_banner() {
   ██╔══██╗██╔══╝  ╚════██║   ██║      ██║   ██║   ██║██║╚██╗██║██║╚██╗██║██╔══╝  
   ██████╔╝███████╗███████║   ██║      ██║   ╚██████╔╝██║ ╚████║██║ ╚████║███████╗
 EOF
-  echo -e "${YELLOW}🛡️  BESTTUNNEL L3 ONLY v8.6 (Rathole REMOVED)  🛡️${NC}"
+  echo -e "${YELLOW}🛡️  BESTTUNNEL SMART v8.6 (Internal Speedtest)  🛡️${NC}"
   echo "--------------------------------------------------------------------------------------"
+}
+
+# --- SMART PROTOCOL SELECTION ---
+auto_select_protocol() {
+  local protocols=("gre" "ipip" "sit")
+  local best_proto=""
+  local best_time=999999
+  local temp_iface="best_probe"
+
+  echo -e "${CYAN}🔍 Testing tunnel protocols for best performance...${NC}"
+
+  for proto in "${protocols[@]}"; do
+    echo -e "   Trying ${YELLOW}$proto${NC}..."
+
+    ip link delete "$temp_iface" 2>/dev/null || true
+
+    case "$proto" in
+      "sit")  ip tunnel add "$temp_iface" mode sit remote "$REMOTE_IP" local "$LOCAL_IP" ttl 255 ;;
+      "ipip") ip tunnel add "$temp_iface" mode ipip remote "$REMOTE_IP" local "$LOCAL_IP" ttl 255 ;;
+      *)      ip tunnel add "$temp_iface" mode gre remote "$REMOTE_IP" local "$LOCAL_IP" ttl 255 ;;
+    esac
+
+    local l_tun="$IP_BASE.1" r_tun="$IP_BASE.2"
+    [[ "$ROLE" == "2" ]] && { l_tun="$IP_BASE.2"; r_tun="$IP_BASE.1"; }
+
+    ip addr add "$l_tun/30" dev "$temp_iface"
+    ip link set dev "$temp_iface" mtu 1300 up
+
+    if timeout 4 ping -c 2 -W 1 "$r_tun" > /dev/null 2>&1; then
+      local start=$(date +%s%3N)
+      timeout 3 ping -c 3 -W 1 "$r_tun" > /dev/null 2>&1
+      local end=$(date +%s%3N)
+      local latency=$((end - start))
+
+      echo -e "   ${GREEN}✔ $proto works (latency: ${latency}ms)${NC}"
+      if (( latency < best_time )); then
+        best_time=$latency
+        best_proto=$proto
+      fi
+    else
+      echo -e "   ${RED}✘ $proto failed${NC}"
+    fi
+
+    ip link delete "$temp_iface" 2>/dev/null || true
+    sleep 1
+  done
+
+  if [[ -n "$best_proto" ]]; then
+    echo -e "${GREEN}✅ Best protocol selected: $best_proto${NC}"
+    MODE="$best_proto"
+  else
+    echo -e "${RED}❌ All protocols failed. Check firewall or network.${NC}"
+    exit 1
+  fi
 }
 
 apply_configs() {
@@ -69,51 +123,105 @@ apply_configs() {
   [[ "$ROLE" == "2" ]] && { L_TUN="$IP_BASE.2"; R_TUN="$IP_BASE.1"; }
 
   ip addr add "$L_TUN/30" dev "$INTERFACE_NAME"
-  ip link set dev "$INTERFACE_NAME" mtu 1050 up
+  ip link set dev "$INTERFACE_NAME" mtu 1300 up
 
-  # Fix MTU/MSS
   sysctl -w net.ipv4.ip_forward=1 > /dev/null
   iptables -t mangle -F
-  iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1000
+  iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1200
 
   if [[ "$ROLE" == "2" ]]; then
     local OUT_IFACE=$(ip route show default | awk '/default/ {print $5; exit}')
     iptables -t nat -A POSTROUTING -s "$IP_BASE.0/30" -o "$OUT_IFACE" -j MASQUERADE
   fi
 
-  echo -e "${GREEN}✔ Tunnel '$INTERFACE_NAME' is UP.${NC}"
+  echo -e "${GREEN}✔ Tunnel '$INTERFACE_NAME' is UP with mode: $MODE${NC}"
 }
 
-run_bandwidth_test() {
-  echo -e "${CYAN}🚀 Starting bandwidth test (using public server)...${NC}"
-  local TEST_URL="http://speedtest.tele2.net/10MB.zip"
-  local TEMP_FILE="/tmp/besttunnel_speed.tmp"
-
-  rm -f "$TEMP_FILE"
-  local START=$(date +%s.%N)
-
-  if wget -O "$TEMP_FILE" --quiet --timeout=30 "$TEST_URL"; then
-    local END=$(date +%s.%N)
-    local SIZE=$(stat -c%s "$TEMP_FILE")
-    local ELAPSED=$(echo "$END - $START" | bc -l)
-    local SPEED=$(echo "scale=2; ($SIZE * 8) / (1024*1024*$ELAPSED)" | bc -l)
-
-    echo -e "${GREEN}✔ Download completed!${NC}"
-    echo -e "   Size: $(($SIZE / 1024 / 1024)) MB"
-    echo -e "   Time: $(printf "%.2f" $ELAPSED) sec"
-    echo -e "   Speed: ${GREEN}$(printf "%.2f" $SPEED) Mbps${NC}"
-  else
-    echo -e "${RED}❌ Failed to download test file. Check internet or firewall.${NC}"
+# --- INTERNAL TUNNEL SPEEDTEST (BETWEEN SERVERS) ---
+run_tunnel_speedtest() {
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo -e "${RED}❌ Tunnel not configured. Run option 1 first.${NC}"
+    return 1
   fi
-  rm -f "$TEMP_FILE"
+
+  source "$CONFIG_FILE"
+
+  local LOCAL_TUN_IP="$IP_BASE.1"
+  local REMOTE_TUN_IP="$IP_BASE.2"
+  [[ "$ROLE" == "2" ]] && { LOCAL_TUN_IP="$IP_BASE.2"; REMOTE_TUN_IP="$IP_BASE.1"; }
+
+  local TEST_FILE="/tmp/besttunnel_test_$$"
+  local PORT=8080
+  local SIZE_MB=10
+  local SIZE_BYTES=$((SIZE_MB * 1024 * 1024))
+
+  if [[ "$ROLE" == "1" ]]; then
+    # === Iran Side: Serve file ===
+    echo -e "${CYAN}📡 Iran side: Serving test file on $LOCAL_TUN_IP:$PORT ...${NC}"
+
+    dd if=/dev/zero of="$TEST_FILE" bs=1M count=$SIZE_MB 2>/dev/null
+
+    if ! command -v python3 >/dev/null; then
+      echo -e "${RED}❌ Python3 not found. Install it first: apt install python3${NC}"
+      rm -f "$TEST_FILE"
+      return 1
+    fi
+
+    python3 -m http.server $PORT --bind "$LOCAL_TUN_IP" > /dev/null 2>&1 &
+    local SERVER_PID=$!
+
+    sleep 2
+
+    if ! kill -0 $SERVER_PID 2>/dev/null; then
+      echo -e "${RED}❌ Failed to start HTTP server.${NC}"
+      rm -f "$TEST_FILE"
+      return 1
+    fi
+
+    echo -e "${GREEN}✔ Server running. Wait for foreign side to connect...${NC}"
+    echo -e "${YELLOW}💡 On foreign server, run the speed test again.${NC}"
+
+    sleep 60
+    kill $SERVER_PID 2>/dev/null
+    rm -f "$TEST_FILE"
+    echo -e "${GREEN}✔ Test server stopped.${NC}"
+
+  else
+    # === Foreign Side: Download from Iran ===
+    echo -e "${CYAN}📥 Foreign side: Downloading from $REMOTE_TUN_IP:$PORT ...${NC}"
+
+    if ! command -v wget >/dev/null; then
+      echo -e "${RED}❌ wget not found. Install it first: apt install wget${NC}"
+      return 1
+    fi
+
+    local TEMP_DL="/tmp/besttunnel_dl_$$"
+    local START=$(date +%s.%N)
+
+    if wget -O "$TEMP_DL" --quiet --timeout=30 "http://$REMOTE_TUN_IP:$PORT/$(basename "$TEST_FILE")" 2>/dev/null; then
+      local END=$(date +%s.%N)
+      local DL_SIZE=$(stat -c%s "$TEMP_DL")
+      local ELAPSED=$(echo "$END - $START" | bc -l)
+      local SPEED_Mbps=$(echo "scale=2; ($DL_SIZE * 8) / (1024*1024*$ELAPSED)" | bc -l)
+
+      echo -e "${GREEN}✔ Download completed!${NC}"
+      echo -e "   Size: $(($DL_SIZE / 1024 / 1024)) MB"
+      echo -e "   Speed: ${GREEN}$(printf "%.2f" $SPEED_Mbps) Mbps${NC}"
+    else
+      echo -e "${RED}❌ Failed to download from $REMOTE_TUN_IP:$PORT${NC}"
+      echo -e "${YELLOW}💡 Make sure Iran side is running the test server.${NC}"
+    fi
+
+    rm -f "$TEMP_DL"
+  fi
 }
 
 fix_connection() {
   sysctl -w net.ipv4.ip_forward=1 > /dev/null
   iptables -t mangle -F
-  iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1000
-  ip link set dev "$INTERFACE_NAME" mtu 1050 2>/dev/null || true
-  echo -e "${GREEN}✔ Connection fixed (MTU/MSS adjusted).${NC}"
+  iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1200
+  ip link set dev "$INTERFACE_NAME" mtu 1300 2>/dev/null || true
+  echo -e "${GREEN}✔ Connection fixed (MTU/MSS adjusted for Iran).${NC}"
 }
 
 setup_routing() {
@@ -162,7 +270,7 @@ uninstall_all() {
   echo -e "${GREEN}✔ Tunnel removed completely.${NC}"
 }
 
-# --- Main Loop ---
+# --- Main Menu ---
 while true; do
   show_banner
 
@@ -171,9 +279,9 @@ while true; do
 
   echo -e " TUNNEL: $TUN_STAT"
   echo "--------------------------------------------------------------------------------------"
-  echo -e " 1) 🛠️   Setup GRE/IPIP/SIT Tunnel"
-  echo -e " 2) ⚡   Bandwidth Test (No iperf needed)"
-  echo -e " 3) 🔧   Fix Connection (MTU/MSS)"
+  echo -e " 1) 🛠️   Setup Smart Tunnel (Auto Protocol)"
+  echo -e " 2) ⚡   Tunnel Speedtest (Between Servers)"
+  echo -e " 3) 🔧   Fix Connection (MTU/MSS for Iran)"
   echo -e " 4) 🛣️   Port Routing"
   echo -e " 5) 🚀   Enable BBR Optimization"
   echo -e " 6) 🧨   UNINSTALL TUNNEL"
@@ -204,17 +312,13 @@ while true; do
         continue
       fi
 
-      echo -e "${CYAN}Select Tunnel Mode:${NC}"
-      echo "1) GRE  (Recommended)"
-      echo "2) IPIP"
-      echo "3) SIT  (IPv6 over IPv4)"
-      read -p "Choice (1/2/3): " MODE_SEL
-      case "$MODE_SEL" in
-        1) MODE="gre" ;;
-        2) MODE="ipip" ;;
-        3) MODE="sit" ;;
-        *) MODE="gre" ;;
-      esac
+      LOCAL_IP=$(hostname -I | awk '{print $1}')
+      if [[ -z "$LOCAL_IP" ]]; then
+        echo -e "${RED}Cannot detect local IP.${NC}"
+        continue
+      fi
+
+      auto_select_protocol
 
       cat > "$CONFIG_FILE" <<EOF
 ROLE=$ROLE
@@ -226,7 +330,7 @@ EOF
       apply_configs
       ;;
 
-    2) run_bandwidth_test ;;
+    2) run_tunnel_speedtest ;;
     3) fix_connection ;;
     4) setup_routing ;;
     5) optimize_bbr ;;
