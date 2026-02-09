@@ -9,4 +9,4 @@
 برای نصب و اجرای مستقیم اسکریپت، دستور زیر را در ترمینال سرور خود کپی و اجرا کنید:
 
 ```bash
-bash <(curl -Ls [https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/install.sh](https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/install.sh))
+bash <(curl -Ls https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/install.sh)
