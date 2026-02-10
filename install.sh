@@ -1,32 +1,47 @@
 #!/bin/bash
 
-# --- Colors ---
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-NC='\033[0m'
+# ==========================================================
+# File: install.sh
+# Description: Installer for BestTunnel Manager
+# ==========================================================
 
-echo -e "${BLUE}Installing BestTunnel Ultimate Edition...${NC}"
+# Check for root
+if [[ $EUID -ne 0 ]]; then
+   echo "Error: Please run as root (sudo ./install.sh)"
+   exit 1
+fi
 
-# ۱. نصب پیش‌نیازها
-echo -e "Installing dependencies..."
-apt-get update -y && apt-get install -y curl iproute2 iptables dnsutils ifstat > /dev/null 2>&1
+echo ">>> Starting Installation of BestTunnel Manager..."
 
-# ۲. دانلود اسکریپت اصلی از گیت‌هاب شما
-# نکته: در لینک زیر به جای USERNAME و REPO، نام کاربری و نام مخزن خود را قرار دهید
-REPO_URL="https://raw.githubusercontent.com/alirezalaleh2005/BestTunnel/main/besttunnel.sh"
-DEST="/usr/local/bin/besttunnel"
+# 1. Install necessary packages
+echo ">>> Installing Nginx and dependencies..."
+apt update
+apt install -y nginx nginx-mod-stream openssl net-tools bc
 
-curl -Ls $REPO_URL -o $DEST
+# 2. Create required directories
+echo ">>> Creating directories..."
+mkdir -p /etc/nginx/certs
+touch /etc/nginx/tunnel_db.txt
 
-if [ $? -eq 0 ]; then
-    chmod +x $DEST
-    # ایجاد میانبر برای اجرای راحت با تایپ کلمه besttunnel
-    ln -s /usr/local/bin/besttunnel /usr/bin/besttunnel 2>/dev/null
-    
-    echo -e "${GREEN}Installation Complete!${NC}"
-    echo -e "You can now run the script by typing: ${BLUE}besttunnel${NC}"
+# 3. Download/Create the main script (besttunnel.sh)
+# Note: This part assumes the besttunnel.sh is in the same folder.
+# We move it to /usr/local/bin so it can be run from anywhere.
+
+if [ -f "besttunnel.sh" ]; then
+    cp besttunnel.sh /usr/local/bin/besttunnel
+    chmod +x /usr/local/bin/besttunnel
+    echo "✅ BestTunnel script installed to /usr/local/bin/besttunnel"
 else
-    echo -e "${RED}Error: Failed to download the script. Please check your internet connection.${NC}"
+    echo "❌ Error: besttunnel.sh not found in the current directory!"
     exit 1
 fi
+
+# 4. Enable Nginx service
+echo ">>> Enabling Nginx service..."
+systemctl enable nginx
+systemctl start nginx
+
+echo "------------------------------------------------"
+echo "✅ INSTALLATION COMPLETE!"
+echo "🚀 You can now run the manager by typing: besttunnel"
+echo "------------------------------------------------"
