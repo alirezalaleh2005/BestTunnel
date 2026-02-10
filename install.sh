@@ -1,32 +1,33 @@
-
 #!/bin/bash
 
 # ==========================================================
-# File: install.sh (All-in-One Version)
+# Project: BestTunnel Manager
+# URL: https://github.com/alirezalaleh2005/BestTunnel
 # ==========================================================
 
+# Colors for better UI
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
 if [[ $EUID -ne 0 ]]; then
-   echo "Error: Please run as root."
+   echo -e "${RED}Error: Please run as root (sudo).${NC}"
    exit 1
 fi
 
-echo ">>> Updating and installing dependencies..."
+echo -e "${GREEN}>>> Initializing BestTunnel Installation...${NC}"
+
+# 1. Update and install Nginx + dependencies
 apt update
-# نصب خودکار nginx (در نسخه‌های جدید ماژول stream به صورت پیش‌فرض همراه nginx نصب می‌شود)
-apt install -y nginx openssl net-tools bc
+apt install -y nginx openssl net-tools bc libnginx-mod-stream
 
-# حل مشکل ماژول Stream در برخی نسخه‌های اوبونتو/دبیان
-if [ ! -d "/etc/nginx/modules-enabled" ]; then
-    apt install -y libnginx-mod-stream
-fi
-
-echo ">>> Creating directories..."
+# 2. Setup Directories and Database
 mkdir -p /etc/nginx/certs
 touch /etc/nginx/tunnel_db.txt
 
-echo ">>> Generating the main script: /usr/local/bin/besttunnel"
+# 3. Create the executable binary in /usr/local/bin
+echo -e "${GREEN}>>> Creating management command 'besttunnel'...${NC}"
 
-# ساخت مستقیم اسکریپت اصلی در مسیر اجرایی سیستم
 cat <<'EOF' > /usr/local/bin/besttunnel
 #!/bin/bash
 DB_FILE="/etc/nginx/tunnel_db.txt"
@@ -56,12 +57,9 @@ EON
     if [ -f "$DB_FILE" ]; then
         while IFS=, read -r l_port r_ip r_port use_tls; do
             echo "    server {" >> /etc/nginx/nginx.conf
-            if [ "$use_tls" == "yes" ]; then
-                echo "        listen $l_port ssl; listen $l_port udp;" >> /etc/nginx/nginx.conf
-            else
-                echo "        listen $l_port; listen $l_port udp;" >> /etc/nginx/nginx.conf
-            fi
-            echo "        proxy_pass $r_ip:$r_port; proxy_timeout 24h;" >> /etc/nginx/nginx.conf
+            [[ "$use_tls" == "yes" ]] && ssl_tag="ssl" || ssl_tag=""
+            echo "        listen $l_port $ssl_tag; listen $l_port udp;" >> /etc/nginx/nginx.conf
+            echo "        proxy_pass $r_ip:$r_port; proxy_timeout 24h; proxy_connect_timeout 2s;" >> /etc/nginx/nginx.conf
             echo "    }" >> /etc/nginx/nginx.conf
         done < "$DB_FILE"
     fi
@@ -69,21 +67,26 @@ EON
     nginx -t && systemctl restart nginx
 }
 
-# --- Menu Logic ---
-echo "1) Add Tunnel  2) List  3) Recovery  4) Reset  5) Exit"
+# Simple Menu Logic
+clear
+echo "BestTunnel Manager v7.5"
+echo "1) Add Tunnel"
+echo "2) List Tunnels"
+echo "3) Reset All"
+echo "4) Exit"
 read -p "Choice: " c
 case $c in
     1) read -p "Local Port: " lp; read -p "Remote IP: " rip; read -p "Remote Port: " rp; read -p "TLS (yes/no): " tls
        echo "$lp,$rip,$rp,$tls" >> "$DB_FILE"; update_nginx_conf ;;
     2) column -s, -t < "$DB_FILE" ;;
-    3) (crontab -l 2>/dev/null; echo "*/5 * * * * systemctl is-active --quiet nginx || systemctl restart nginx") | crontab - ;;
-    4) rm -f "$DB_FILE" && touch "$DB_FILE" && update_nginx_conf ;;
-    5) exit 0 ;;
+    3) rm -f "$DB_FILE" && touch "$DB_FILE" && update_nginx_conf ;;
+    4) exit 0 ;;
 esac
 EOF
 
 chmod +x /usr/local/bin/besttunnel
 
-echo "------------------------------------------------"
-echo "✅ SUCCESS! Now just type: besttunnel"
-echo "------------------------------------------------"
+echo -e "------------------------------------------------"
+echo -e "${GREEN}✅ INSTALLATION SUCCESSFUL!${NC}"
+echo -e "Run the manager by typing: ${GREEN}besttunnel${NC}"
+echo -e "------------------------------------------------"
